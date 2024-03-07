@@ -1,0 +1,122 @@
+---
+title: "read_data"
+output: pdf_document
+date: "2023-04-19"
+---
+
+```{r}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(GGally)
+library(caret)
+library(stringr)
+```
+
+```{r}
+full_data <- read.csv(file='./data/listings.csv')
+```
+
+```{r}
+data1 <- full_data %>% dplyr::select(host_since, host_response_time, host_response_rate, host_acceptance_rate, host_is_superhost, host_listings_count, host_has_profile_pic, host_identity_verified, neighbourhood_group_cleansed, latitude, longitude, room_type, accommodates, bathrooms_text, bedrooms, beds, price, minimum_nights, availability_365, review_scores_rating, review_scores_accuracy, review_scores_cleanliness, review_scores_checkin, review_scores_communication, review_scores_location, review_scores_value, instant_bookable, reviews_per_month)
+```
+
+```{r}
+# check correlation
+GGally::ggcorr(data1, method = c("pairwise.complete.obs", "pearson"),
+  digits = 1, 
+  palette = "RdGy",
+  label = TRUE, label_alpha = TRUE,
+  size = 3, hjust = 0.9, layout.exp = 1) +
+  ggtitle("Correlation")
+```
+```{r}
+missing <- is.na(data1)
+col_missing <- colSums(missing)
+col_missing
+```
+
+
+```{r}
+# removed correlated variables
+data2 <- full_data %>% dplyr::select(host_since, host_response_time, host_is_superhost, host_listings_count, host_has_profile_pic, host_identity_verified, neighbourhood_group_cleansed, latitude, longitude, room_type, bathrooms_text, accommodates, price, minimum_nights, availability_365, review_scores_rating, instant_bookable, reviews_per_month)
+```
+
+```{r}
+# check correlation
+GGally::ggcorr(data2, method = c("pairwise.complete.obs", "pearson"),
+  digits = 1, 
+  palette = "RdGy",
+  label = TRUE, label_alpha = TRUE,
+  size = 3, hjust = 0.9, layout.exp = 1) +
+  ggtitle("Correlation")
+```
+```{r}
+# remove signs and text
+#data2$host_response_rate=as.numeric(gsub('[%]','',data2$host_response_rate))/100
+#data2$host_acceptance_rate=as.numeric(gsub('[%]','',data2$host_acceptance_rate))/100
+
+data2$price=as.numeric(gsub('[$,]', '',data2$price))
+
+data2$host_is_superhost <- ifelse(data2$host_is_superhost == "t", 1, 0)
+data2$host_has_profile_pic <- ifelse(data2$host_has_profile_pic == "t", 1, 0)
+data2$host_identity_verified <- ifelse(data2$host_identity_verified == "t", 1, 0)
+data2$instant_bookable <- ifelse(data2$instant_bookable == "t", 1, 0)
+
+# clean bathrooms column
+data2$bathrooms_text=gsub('half','0.5',data2$bathrooms_text)
+data2$bathrooms_text=gsub('Half','0.5',data2$bathrooms_text)
+data2$bathrooms_text=str_replace_all(data2$bathrooms_text,'[a-zA-Z ]',replacement='')
+data2$bathrooms_text=as.numeric(str_replace_all(data2$bathrooms_text,'-',replacement=''))
+
+# ordinal encode response time
+# unique(data2$host_response_time)
+data2$host_response_time=gsub('a few days or more','1',data2$host_response_time)
+data2$host_response_time=gsub('within a day','2',data2$host_response_time)
+data2$host_response_time=gsub('within a few hours','3',data2$host_response_time)
+data2$host_response_time=gsub('within an hour','4',data2$host_response_time)
+data2$host_response_time=as.numeric(data2$host_response_time)
+
+# one hot encode room type
+encoded_room_type <- dummyVars("~ room_type", data = data2) %>% predict(data2)
+data2 <- cbind(data2, encoded_room_type)
+data2 <- data2[ , !(names(data2) %in% "room_type")]
+
+# one hot encode neighborhood group
+encoded_neighborhood <- dummyVars("~ neighbourhood_group_cleansed", data = data2) %>% predict(data2)
+data2 <- cbind(data2, encoded_neighborhood)
+# data2 <- data2[ , !(names(data2) %in% "neighbourhood_group_cleansed")]
+
+# turn NAs into 0
+data2 <- replace(data2, is.na(data2), 0)
+```
+
+```{r}
+# turn date into days
+data2$host_since=as.double(Sys.Date()-as.Date(data2$host_since))
+# omit na
+data2 <- na.omit(data2)
+
+# delete rows with price of zero
+data2 <- data2[data2$price != 0, ]
+# log transform price
+data2$price_log <- log(data2$price)
+```
+
+```{r}
+missing <- is.na(data2)
+col_missing <- colSums(missing)
+col_missing
+```
+
+```{r}
+write.csv(data2, file='./data/listings_EDA.csv', row.names = FALSE)
+data2 <- data2[ , !(names(data2) %in% c("neighbourhood_group_cleansed", "price", "latitude", "longitude"))]
+
+
+write.csv(data2, file='./data/listings_clean.csv', row.names = FALSE)
+```
+

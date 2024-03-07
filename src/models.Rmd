@@ -1,0 +1,238 @@
+---
+title: "models"
+output: pdf_document
+date: "2023-04-23"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(GGally)
+library(lmerTest)
+library(glmnet)
+library(tidyr)
+```
+
+```{r}
+data_clean <- read.csv(file='./data/listings_clean.csv')
+data_scaled <- as.data.frame(scale(data_clean))
+```
+
+```{r}
+# train test split
+set.seed(0) 
+train_indices <- sample(1:nrow(data_scaled), 0.8 * nrow(data_scaled))
+train_data <- data_scaled[train_indices,]
+test_data <- data_scaled[-train_indices,]
+```
+
+```{r}
+full_model <- lm(price_log ~ ., data = train_data)
+```
+
+```{r}
+fit1 <- lm(price_log ~ ., data = train_data)
+fit2 <- lm(price_log ~ 1, data = train_data)
+forward_model <- step(fit2, direction = "forward", scope=list(upper=fit1, lower=fit2), trace=0)
+summary(forward_model)
+```
+
+
+```{r}
+backward_model <- step(fit1, direction = "backward", trace=0)
+summary(backward_model)
+```
+
+```{r}
+# lasso
+# lambda grid
+grid = 10^seq(2, -4, length = 100)
+# split data
+x_train <- model.matrix(price_log ~ ., train_data)[,-1]  # removing the intercept
+y_train <- train_data$price_log
+x_test <- model.matrix(price_log ~ ., test_data)[,-1]
+y_test <- test_data$price_log
+
+lasso_cv <- cv.glmnet(x_train, y_train, alpha = 1, lambda = grid)
+lasso_model <- glmnet(x_train, y_train, alpha = 1, lambda = lasso_cv$lambda.min)
+```
+
+```{r}
+# ridge
+ridge_cv <- cv.glmnet(x_train, y_train, alpha = 0, lambda = grid)
+ridge_model <- glmnet(x_train, y_train, alpha = 0, lambda = ridge_cv$lambda.min)
+```
+
+
+```{r}
+# RMSE
+rmse <- function(predicted, actual) {
+  sqrt(mean((predicted - actual)^2))
+}
+
+# R_squared
+r_squared <- function(predicted, actual) {
+  1 - (sum((actual - predicted)^2) / sum((actual - mean(actual))^2))
+}
+
+# Full model
+full_pred <- predict(full_model, test_data)
+full_rmse <- rmse(full_pred, test_data$price_log)
+full_r_squared <- r_squared(full_pred, test_data$price_log)
+
+# Forward selection
+forward_pred <- predict(forward_model, newdata = test_data)
+forward_rmse <- rmse(forward_pred, test_data$price_log)
+forward_r_squared <- r_squared(forward_pred, test_data$price_log)
+
+# Backward selection
+backward_pred <- predict(backward_model, newdata = test_data)
+backward_rmse <- rmse(backward_pred, test_data$price_log)
+backward_r_squared <- r_squared(backward_pred, test_data$price_log)
+
+
+# Lasso
+lasso_pred <- predict(lasso_model, s = lasso_cv$lambda.min, newx = x_test)
+lasso_rmse <- rmse(lasso_pred, y_test)
+lasso_r_squared <- r_squared(lasso_pred, y_test)
+
+# Ridge
+ridge_pred <- predict(ridge_model, s = ridge_cv$lambda.min, newx = x_test)
+ridge_rmse <- rmse(ridge_pred, y_test)
+ridge_r_squared <- r_squared(lasso_pred, y_test)
+```
+```{r}
+# baselines
+target <- data_scaled$price_log
+mean_target <- mean(target)
+baseline <- rep(mean_target, length(target))
+baseline_rmse <- rmse(target, baseline)
+
+rss <- sum((baseline - target)^2)
+tss <- sum((target - mean(target))^2)
+baseline_rsq <- 1 - rss/tss
+```
+
+```{r}
+results <- data.frame(
+  Model = c("Baseline","Full", "Forward", "Backward", "Lasso", "Ridge"),
+  RMSE = c(baseline_rmse, full_rmse, forward_rmse, backward_rmse, lasso_rmse, ridge_rmse),
+  R_squared = c(baseline_rsq, full_r_squared, forward_r_squared, backward_r_squared, lasso_r_squared, ridge_r_squared)
+)
+
+print(results)
+```
+```{r}
+# full model
+full_coef_abs <- abs(coef(full_model)[-1]) # Remove intercept
+full_coef_importance <- data.frame(Feature = names(full_coef_abs), 
+                                   Importance = full_coef_abs, row.names = NULL)
+full_coef_importance <- full_coef_importance %>% arrange(desc(Importance))
+print(full_coef_importance)
+```
+```{r}
+# forward
+forward_coef_abs <- abs(coef(forward_model)[-1])
+forward_coef_importance <- data.frame(Feature = names(forward_coef_abs), 
+                                      Importance = forward_coef_abs,
+                                      row.names = NULL)
+forward_coef_importance <- forward_coef_importance %>% arrange(desc(Importance))
+print(forward_coef_importance)
+```
+```{r}
+# backward
+backward_coef_abs <- abs(coef(backward_model)[-1])
+backward_coef_importance <- data.frame(Feature = names(backward_coef_abs), 
+                                       Importance = backward_coef_abs, row.names = NULL)
+backward_coef_importance <- backward_coef_importance %>% arrange(desc(Importance))
+print(backward_coef_importance)
+```
+```{r}
+# lasso
+lasso_coef_abs <- abs(coef(lasso_model)[-1]) 
+lasso_importance <- data.frame(Feature = colnames(x_train), Importance = lasso_coef_abs,
+                               row.names = NULL)
+lasso_importance <- lasso_importance %>% arrange(desc(Importance))
+print(lasso_importance)
+```
+
+```{r}
+# Remove intercept
+ridge_coef_abs <- abs(coef(ridge_model)[-1]) # Remove intercept
+ridge_importance <- data.frame(Feature = colnames(x_train), Importance = ridge_coef_abs,
+                               row.names = NULL)
+ridge_importance <- ridge_importance %>% arrange(desc(Importance))
+print(ridge_importance)
+```
+
+```{r}
+# bootstrap for three most important features in forward model
+boot <- 1000
+betas <- data.frame(entire_home = numeric(boot), 
+                    Manhattan = numeric(boot), 
+                    accommodates = numeric(boot))
+# fit lm for each iteration and save the betas
+for (i in 1:boot) {
+  s_boot <- sample(c(1:dim(data_scaled)[1]), dim(data_scaled)[1], replace = TRUE) 
+  data_boot <- data_scaled[s_boot,]
+  model_boot <- lm(formula = forward_model$call$formula, data = data_boot)
+  betas[i, ] <- coef(model_boot)[c("room_typeEntire.home.apt",
+                                   "neighbourhood_group_cleansedManhattan", 
+                                   "accommodates")]
+}
+# put in dataframe
+betas_long <- gather(betas, key = "variable", value = "value", entire_home, Manhattan, accommodates) 
+```
+
+```{r}
+# plot
+betas_long$variable <- factor(betas_long$variable, 
+                              levels = c("entire_home", "Manhattan", "accommodates"))
+ggplot(data=betas_long, aes(variable, value, fill=variable)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c('#DDA0DD', '#FF9282', '#FFC0CB'), name="") +
+  theme_bw() +
+  theme(text = element_text(size = 13)) + theme(aspect.ratio=1/1.65) +
+  xlab("covariates") +
+  ylab("estimate") +
+  ggtitle("Beta estimates from bootstrap")
+```
+
+```{r}
+
+# Plot residuals vs fitted values
+plot(full_model$fitted.values, full_model$residuals, 
+     xlab = "Fitted values", ylab = "Residuals", 
+     main = "Residuals vs Fitted Values for Full Model",
+     col = "blue")
+# Add a horizontal line at zero
+abline(h = 0, col = "red")
+
+plot(full_model)
+
+```
+
+```{r}
+
+predictions <- data.frame(y_true = test_data$price_log, y_pred = predict(forward_model, newdata = test_data))
+
+library(ggplot2)
+
+ggplot(predictions, aes(x = y_true, y = y_pred)) +
+  geom_point() +
+  geom_abline(color = "#F08080", size = 1)
+
+# Plot predicted vs actual values with a regression line
+ggplot(predictions, aes(x = y_true, y = y_pred)) +
+  geom_point(color = "#FFC0CB", alpha = 0.7) +
+  geom_abline(intercept = 0, slope = 1, color = "#FF69B4", linetype = "dashed") +
+  labs(x = "true values", y = "predicted values") +
+  ggtitle("True values vs prediction for forward model")+
+  theme_bw() +
+  theme(text = element_text(size = 13)) + theme(aspect.ratio=1/1.6) 
+
+```

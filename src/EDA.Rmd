@@ -1,0 +1,86 @@
+---
+title: "EDA"
+output: pdf_document
+date: "2023-04-23"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(GGally)
+library(gridExtra)
+```
+
+```{r}
+data_EDA <- read.csv(file='./data/listings_EDA.csv')
+data_clean <- read.csv(file='./data/listings_clean.csv')
+```
+
+```{r}
+colors <- c('#800080','#DDA0DD', '#FF9282', '#FFC0CB')
+# Create a summary data frame with mean and standard error for each category
+summary_data <- data_EDA %>%
+  group_by(room_type) %>%
+  summarize(mean_price = mean(price),
+            se_price = sd(price) / sqrt(n()))
+
+# Create a bar chart of prices by category with error bars
+ggplot(summary_data, aes(x=reorder(room_type, -mean_price), y=mean_price, fill=room_type)) +
+  scale_fill_manual(values = colors, name="")+
+  theme_bw()+
+  theme(text = element_text(size = 15)) + theme(aspect.ratio=1/1.3) +
+  geom_bar(stat="identity", position="dodge") +
+  geom_errorbar(aes(ymin=mean_price-se_price, ymax=mean_price+se_price), width=0.2, position=position_dodge(0.9)) +
+  labs(x="room type", y="price") +
+  ggtitle("NYC Airbnb price for different room types")
+```
+
+```{r}
+# check correlation
+p<-GGally::ggcorr(data_clean, method = c("pairwise.complete.obs", "pearson"),
+  digits = 1, 
+  low = '#800080', mid = '#FFC0CB', high = '#FFF8DC', 
+  label = TRUE, label_size = 2, label_color = "black",
+  size = 2.7, hjust = 1, layout.exp = 4) 
+grid.arrange(p, bottom="Correlation plot of selected and processed features")
+```
+
+```{r}
+colors <- c('#800080','#DDA0DD', '#FF9282', '#FFC0CB', '#FFF8DC')
+ggplot(data=data_EDA, aes(x=neighbourhood_group_cleansed, y=price, fill=neighbourhood_group_cleansed)) +
+  geom_boxplot() +
+  scale_y_log10() +
+  theme_bw()+
+  theme(text = element_text(size = 15)) + theme(aspect.ratio=1/1.3) +
+  scale_fill_manual(values = colors, name="")+
+  xlab("neighborhood") +
+  ylab("price (log scale)") +
+  ggtitle("NYC Airbnb price for five neighborhoods")
+```
+```{r fig4, out.width = '40%'}
+ggplot(data=data_EDA,aes(price))+
+  geom_histogram(bins=30, fill='#FF9282',color='#e9ecef')+
+  theme_bw()+scale_x_log10()+
+  theme(text = element_text(size = 15)) + theme(aspect.ratio=1/1.3) +
+  labs(x='price (log scale)',y='count',title='NYC Airbnb price distribution')
+```
+```{r}
+library(ggmap)
+library(sp)
+library(mapview)
+library(RColorBrewer)
+map_EDA=data.frame(price_level=cut(data_EDA$price_log, breaks=c(-Inf, 0.25*max(data_EDA$price_log), 0.5*max(data_EDA$price_log), 0.75*max(data_EDA$price_log), Inf), labels = c(1,2,3,4), right=FALSE))
+map_EDA$longitude = data_EDA$longitude
+map_EDA$latitude = data_EDA$latitude
+
+map_view=map_EDA
+coordinates(map_view)=~longitude+latitude
+proj4string(map_view)=CRS('+init=epsg:4326')
+pal = colorRampPalette(brewer.pal(9, "YlOrRd"))
+mapview(map_view,zcol='price_level', cex=2, alpha=0.5, col.regions=pal, color=NA)
+```
+

@@ -1,0 +1,69 @@
+---
+title: "multilevel"
+output: pdf_document
+date: "2023-04-29"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+data_EDA <- read.csv(file='./data/listings_EDA.csv')
+```
+
+```{r}
+type_entire <- data_EDA$room_typeEntire.home.apt
+price_log <- data_EDA$price_log
+
+# put neighborhood into numbers
+neighborhood_name <- as.vector(data_EDA$neighbourhood_group_cleansed)
+uniq <- unique(neighborhood_name)
+J <- length(uniq)
+neighborhood <- rep (NA, J)
+for (i in 1:J){
+  neighborhood[neighborhood_name==uniq[i]] <- i
+}
+```
+
+```{r}
+# Complete pooling regression
+lm_pooled <- lm (price_log ~ type_entire)
+
+# Varying intercept regression
+M1 <- lmer (price_log ~ type_entire + (1 | neighborhood))
+
+a.hat.M1 <- coef(M1)$neighborhood[,1]                # 1st column is the intercept
+b.hat.M1 <- coef(M1)$neighborhood[,2]                # 2nd element is the slope
+
+## Varying intercept & slopes regression
+M2 <- lmer (price_log ~ type_entire + (1 + type_entire | neighborhood))
+
+a.hat.M2 <- fixef(M2)[1] + ranef(M2)$neighborhood[,1] 
+b.hat.M2 <- fixef(M2)[2] + ranef(M2)$neighborhood[,2]
+```
+
+```{r}
+# plot
+n <- length(price_log)
+x.jitter <- type_entire + runif(n,-.05,.05)
+display8 <- c (1,2,3,4,5) 
+y.range <- range (price_log[!is.na(match(neighborhood,display8))])
+
+png(file='./plots/multilevel.png',width=12, height=2.5, units='in', pointsize = 14, res=350)
+
+par (mfrow=c(1,5))
+par(mar = c(3, 3, 1, 1) + 0.1)
+for (j in display8){
+  plot (x.jitter[neighborhood==j], price_log[neighborhood==j], xlim=c(-.05,1.05), ylim=y.range,
+    xlab="entire home apt", ylab="log price", main=uniq[j], cex.lab=1,
+    cex.axis=1, pch=20, mgp=c(1.5,.7,0), xaxt="n", yaxt="n", cex.main=1)
+  axis (1, c(0,1), mgp=c(2,.7,0), cex.axis=1)
+  axis (2, c(2,4,6,8,10), mgp=c(2,.7,0), cex.axis=1)
+  curve (coef(lm_pooled)[1] + coef(lm_pooled)[2]*x, lty=2, col="gray10", add=TRUE)
+  curve (a.hat.M1[j] + b.hat.M1[j]*x, lwd=1, col="red", add=TRUE)
+  curve (a.hat.M2[j] + b.hat.M2[j]*x, lwd=1, col="blue", add=TRUE)
+} 
+dev.off()
+```
+
