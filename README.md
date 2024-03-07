@@ -21,7 +21,7 @@ The core statistical method used in this project is **Linear Regression**. This 
 ## Files and Folders
 ├── data: original and processed downloaded from Kaggle\
 ├── plots: plots and figures\
-├── src: \ 
+├── src: 
 ├──── Airbnb_predict.ipynb: data_cleaning, EDA, models, multilevel in python\
 ├──── data_cleaning.Rmd: download, clean, and process dataset\
 ├──── EDA.Rmd: exploratory data analysis\
